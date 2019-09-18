@@ -1,0 +1,21 @@
+IP_proteinGroup_Vecerek.xlsx - to chci pouzit, ostatni jen vyfiltrovany
+
+C: Bordetella - +, kdyz je z B.
+C: Only identified by site, C: Reverse, C: Potential contaminant - vyfiltrovat, kdyz +
+
+N: Unique peptides - filtruji, kdyz >= 2
+N: Q-value - melo by byt 0 (filtrovat)
+N: MS/MS count - filtrovat pod 4
+
+N: Number of proteins - melo by byt 1 nebo 2
+
+
+T: Protein IDs   UniProt
+T: Gene names - jmena v Bordetella
+
+Bp46, Bp6260 - kmeny, urcuje i nemocneho pacianta
+S611 - negativni kontrola (ockovan neznamo jak, nebyl nemocen)
+I, II - odbery
+
+Je potreba brat kmeny jako ruzne (protoze to jsou i jini pacienti)
+Hlavni markery vysly u ditete jinak nez u mladistveho

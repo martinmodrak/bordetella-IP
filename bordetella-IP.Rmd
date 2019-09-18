@@ -1,0 +1,64 @@
+---
+title: "Bordetelle-IP"
+output: html_notebook
+---
+
+```{r setup}
+library(readxl)
+library(brms)
+library(here)
+library(tidyverse)
+
+data_folder <- here("private_data")
+
+log_gm_mean <- function(x, na.rm=TRUE){
+  sum(log(x[x > 0]), na.rm=na.rm) / length(x)
+}
+```
+
+Load the data
+
+```{r}
+descriptors <- read_excel(paste0(data_folder, "/IP_samples_quantity.xlsx"), range = "M2:R26", col_types = "text") %>%
+  mutate(No = as.integer(No))
+
+data <- read_excel(paste0(data_folder, "/IP_proteinGroup_Vecerek.xlsx"), range = "A1:AV1301", col_types = c(rep("numeric", 24), rep("text",4), rep("numeric", 15), rep("text",5)), na = c("","NaN")) %>% 
+  #Filter as described by Denisa
+  filter(is.na(`C: Only identified by site`), is.na(`C: Reverse`), is.na(`C: Potential contaminant`), 
+         `N: Unique peptides` >= 2 , `N: Q-value` == 0, `N: MS/MS count` >= 4,
+         `N: Number of proteins` <= 2) 
+         # `N: Unique peptides` >= 2 , `N: Q-value` < 1e-23, `N: MS/MS count` >=4,
+         # `N: Number of proteins` <= 2) 
+
+data_long <- data %>% 
+  gather("Sample_No","LFQ", `LFQ intensity 1`:`LFQ intensity 24`) %>%
+  mutate(Sample_No = as.integer(gsub("LFQ intensity ","", Sample_No, fixed = TRUE)),
+         log2_LFQ = log2(LFQ)) %>%
+  #Compute proportions
+  group_by(Sample_No) %>%
+  mutate(prop_LFQ = LFQ / sum(LFQ), clr_LFQ = log(LFQ + 0.5) - log_gm_mean(LFQ + 0.5) ) %>%
+  ungroup() %>%
+  inner_join(descriptors, by = c("Sample_No" = "No"))
+
+data_main <- data_long %>% filter(Type != "NoSerum", `C: Bordetella` == "+") 
+
+data_long %>% group_by(Sample_No) %>% 
+  summarise(sum(LFQ > 0))
+
+```
+
+TODO: pocty vyse nesedi s tim, co mam od Denisy
+
+
+Kvalita - jsou nejake veci, ktere jsou ve vsech nemocnych a v zadne kontrole?
+
+```{r}
+LFQ_Threshold = 2^20
+
+data_main %>% 
+  mutate(Infected = Type != "NotInfected") %>%
+  group_by(`T: Protein IDs`) %>%
+  summarise(InAllInfected = all(LFQ[Infected] > LFQ_Threshold), InNoHealthy = all(LFQ[!Infected] == 0)) %>%
+  filter(InAllInfected, InNoHealthy)
+```
+
