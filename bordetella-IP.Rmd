@@ -8,6 +8,7 @@ library(readxl)
 library(brms)
 library(here)
 library(tidyverse)
+library(cowplot)
 
 data_folder <- here("private_data")
 
@@ -20,29 +21,41 @@ Load the data
 
 ```{r}
 descriptors <- read_excel(paste0(data_folder, "/IP_samples_quantity.xlsx"), range = "M2:R26", col_types = "text") %>%
-  mutate(No = as.integer(No))
+  mutate(No = as.integer(No), Type = factor(Type, levels = c("No_Serum", "Not_Infected", "Infected_Early", "Infected_Late")))
 
-data <- read_excel(paste0(data_folder, "/IP_proteinGroup_Vecerek.xlsx"), range = "A1:AV1301", col_types = c(rep("numeric", 24), rep("text",4), rep("numeric", 15), rep("text",5)), na = c("","NaN")) %>% 
-  #Filter as described by Denisa
-  filter(is.na(`C: Only identified by site`), is.na(`C: Reverse`), is.na(`C: Potential contaminant`), 
-         `N: Unique peptides` >= 2 , `N: Q-value` == 0, `N: MS/MS count` >= 4,
-         `N: Number of proteins` <= 2) 
-         # `N: Unique peptides` >= 2 , `N: Q-value` < 1e-23, `N: MS/MS count` >=4,
-         # `N: Number of proteins` <= 2) 
+
+data <- read_excel(paste0(data_folder, "/IP_proteinGroup_Vecerek.xlsx"), range = "A1:AV1301", col_types = c(rep("numeric", 24), rep("text",4), rep("numeric", 15), rep("text",5)), na = c("","NaN"))   
+
+
 
 data_long <- data %>% 
-  gather("Sample_No","LFQ", `LFQ intensity 1`:`LFQ intensity 24`) %>%
+  gather("Sample_No","LFQ", `LFQ intensity 1`:`LFQ intensity 24`)
+
+min_LFQ <- min(data_long$LFQ[data_long$LFQ > 0])
+
+data_long <- data_long %>%
   mutate(Sample_No = as.integer(gsub("LFQ intensity ","", Sample_No, fixed = TRUE)),
-         log2_LFQ = log2(LFQ)) %>%
-  #Compute proportions
+         log2_LFQ = log2(LFQ), log2_LFQ_pseudo = log2(LFQ + min_LFQ / 20)) %>%
+  #Compute proportions and centered log ratio
   group_by(Sample_No) %>%
   mutate(prop_LFQ = LFQ / sum(LFQ), clr_LFQ = log(LFQ + 0.5) - log_gm_mean(LFQ + 0.5) ) %>%
   ungroup() %>%
   inner_join(descriptors, by = c("Sample_No" = "No"))
 
-data_main <- data_long %>% filter(Type != "NoSerum", `C: Bordetella` == "+") 
+data_long_filtered <- data_long %>%
+    filter(is.na(`C: Only identified by site`), is.na(`C: Reverse`), is.na(`C: Potential contaminant`), 
+         `N: Unique peptides` >= 2 , `N: Q-value` < 1e-23, `N: MS/MS count` >=4,
+         `N: Number of proteins` <= 2)  
 
-data_long %>% group_by(Sample_No) %>% 
+
+data_main <- data_long_filtered %>% 
+  #Filter as described by Denisa - filtering after taking proportions and CLR
+  filter(Type != "NoSerum", `C: Bordetella` == "+") %>%
+  group_by(`T: Protein IDs`) %>%
+  filter(sum(LFQ > 0) > 2) %>%
+  ungroup()
+
+data_long_filtered %>% group_by(Sample_No) %>% 
   summarise(sum(LFQ > 0))
 
 ```
@@ -53,12 +66,107 @@ TODO: pocty vyse nesedi s tim, co mam od Denisy
 Kvalita - jsou nejake veci, ktere jsou ve vsech nemocnych a v zadne kontrole?
 
 ```{r}
-LFQ_Threshold = 2^20
+LFQ_Threshold = 2^10
 
 data_main %>% 
   mutate(Infected = Type != "NotInfected") %>%
   group_by(`T: Protein IDs`) %>%
-  summarise(InAllInfected = all(LFQ[Infected] > LFQ_Threshold), InNoHealthy = all(LFQ[!Infected] == 0)) %>%
+  summarise(InAllInfected = sum(LFQ[Infected] < LFQ_Threshold) < 2, InNoHealthy = sum(LFQ[!Infected] < 0) < 1) %>%
   filter(InAllInfected, InNoHealthy)
 ```
+
+```{r}
+data_long_filtered %>%
+  filter(LFQ > 0) %>%
+  ggplot(aes(x = clr_LFQ)) +
+  geom_histogram() + facet_wrap(~Sample_No, ncol = 4, dir = "v")
+
+
+```
+```{r}
+pertussin_peptides <- c("P0A3R5", "P04978", "P04977", "P04979", "P04981")
+elisa_active_peptides <- c("P12255", "P0DKX7", "Q79GX8")
+
+peptide_names_from_table <- function(filename) {
+  read_tsv(paste0(data_folder,"/", filename), col_types =  cols(
+  Entry = col_character(),
+  `Entry name` = col_character(),
+  Status = col_character(),
+  `Protein names` = col_character(),
+  `Gene names` = col_character(),
+  Organism = col_character(),
+  Length = col_double()
+)) %>% pull(Entry)
+}
+
+ribosomal_peptides <- peptide_names_from_table("Tab1_Bp_ribosomal proteins_uniprot.txt")
+tRNA_ligase_peptides <- peptide_names_from_table("Tab2_Bp_Tohama_uniprot_tRNA_ligase.txt")
+
+```
+
+
+# Choosing reasonable transformation of the LFQ data
+
+We would expect pertussin peptides and peptides shown active by ELISA to grow (together called active_peptides) while tRNA ligase and ribosomal peptides to be roughly flat. We also want to see that the samples of one type form a single cluster.
+
+```{r}
+active_peptides <- c(pertussin_peptides, elisa_active_peptides)
+#peptides_to_show <- tRNA_ligase_peptides
+
+plot_peptides <- function(y_aes, peptides_to_show, scales = "fixed") {
+  name <-  quo_name(enquo(peptides_to_show))
+  data_main %>%
+    filter(`T: Protein IDs` %in% peptides_to_show, Type != "No_Serum") %>%
+    ggplot(aes(x = Type, y = {{ y_aes }}, color = serum, shape = Bp)) + 
+    geom_smooth(aes(group = `T: Protein IDs`), method = "lm", color = "black") +
+    geom_jitter(width = 0.2, height = 0) + facet_wrap(~`T: Protein IDs`, scales = scales) + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5), axis.text.y = element_blank()) +
+    ggtitle(name)
+}
+
+plot_peptides(clr_LFQ, active_peptides)
+plot_peptides(clr_LFQ, tRNA_ligase_peptides)
+plot_peptides(clr_LFQ, ribosomal_peptides)
+```
+clr_LFQ has nice slopes but there are often multiple cluseters of values.
+
+```{r}
+plot_peptides(log2_LFQ, active_peptides)
+plot_peptides(log2_LFQ, tRNA_ligase_peptides)
+plot_peptides(log2_LFQ, ribosomal_peptides)
+```
+
+log2_LFQ has clusters and the slopes are fishy as both ribosomal and tRNA peptides also tend grow overall (although less than pertussin
+
+```{r}
+plot_peptides(log2_LFQ_pseudo, active_peptides)
+plot_peptides(log2_LFQ_pseudo, tRNA_ligase_peptides)
+plot_peptides(log2_LFQ_pseudo, ribosomal_peptides)
+```
+log2_LFQ_pseudo has nice slopes but has clusters.
+
+```{r}
+plot_peptides(prop_LFQ, active_peptides, scales = "free_y")
+plot_peptides(prop_LFQ, tRNA_ligase_peptides, scales = "free_y")
+plot_peptides(prop_LFQ, ribosomal_peptides, scales = "free_y")
+```
+
+prop_LFQ has few clusters but the slopes  are positive almost everywhere.
+
+```{r}
+plot_peptides(LFQ, active_peptides, scales = "free_y")
+plot_peptides(LFQ, tRNA_ligase_peptides, scales = "free_y")
+plot_peptides(LFQ, ribosomal_peptides, scales = "free_y")
+```
+
+LFQ has few clusters and too positive slopes.
+
+Verdict: There are two groups of metrics those on the log scale, which tend to have good slopes, but multiple clusters and those on raw scale which tend to have positive slopes even for "control" peptides but do not have clusters.
+
+For further investigation, we will use clr_LFQ as the representive from the first group, as there are theoretical resons to choose it and LFQ from the latter group as it is simpler.
+
+- 
+
+
+
 
