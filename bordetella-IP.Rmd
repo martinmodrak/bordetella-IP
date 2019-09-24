@@ -39,6 +39,7 @@ min_LFQ <- min(data_long$LFQ[data_long$LFQ > 0])
 data_long <- data_long %>%
   mutate(Sample_No = as.integer(gsub("LFQ intensity ","", Sample_No, fixed = TRUE)),
          log2_LFQ = log2(LFQ), log2_LFQ_pseudo = log2(LFQ + min_LFQ / 20)) %>%
+  inner_join(descriptors, by = c("Sample_No" = "No")) %>%
   #Compute proportions and centered log ratio
   group_by(ProteinIDs, Type) %>%
   mutate(sd_log_group = sd(log(LFQ[LFQ > 0]))) %>%
@@ -47,8 +48,7 @@ data_long <- data_long %>%
          clr_LFQ = log(LFQ + 0.5) - log_gm_mean(LFQ + 0.5),
          LFQ_imputed = if_else(LFQ == 0, rlnorm(n(), log(quantile(LFQ[LFQ > 0], 0.05)), median(sd_log_group, na.rm = TRUE)), LFQ)
          ) %>%
-  ungroup() %>%
-  inner_join(descriptors, by = c("Sample_No" = "No"))
+  ungroup() 
 
 data_long_filtered <- data_long %>%
     filter(is.na(`C: Only identified by site`), is.na(`C: Reverse`), is.na(`C: Potential contaminant`), 
@@ -197,11 +197,11 @@ For further investigation, we will use clr_LFQ as the representive from the firs
 # Testing models on the pertussin peptides
 
 ```{r}
-data_pertussin <- data_main %>% filter(ProteinIDs %in% pertussin_peptides, Type != "No_Serum") 
+data_pertussin <- data_main %>% filter(ProteinIDs %in% pertussin_peptides) 
 
 #fit_pertussin <- brm(LFQ + 0.5 ~ ProteinIDs*(Infected + Infected_Late), family = "lognormal", data = data_pertussin)
 #fit_pertussin <- brm(LFQ + 0.5 ~ ProteinIDs +  ProteinIDs:(Infected + Infected_Late), family = "lognormal", data = data_pertussin)
-fit_pertussin <- brm(bf(LFQ + 0.5 ~ ProteinIDs*(Infected + Infected_Late), sigma ~ ProteinIDs:Type), family = "lognormal", data = data_pertussin)
+fit_pertussin <- brm(bf(LFQ_imputed ~ ProteinIDs*(Infected + Infected_Late), sigma ~ ProteinIDs:Type), family = "lognormal", data = data_pertussin)
 ```
 ```{r}
 fit_pertussin

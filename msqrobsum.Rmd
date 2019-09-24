@@ -1,0 +1,207 @@
+---
+title: "MsqRobSum"
+output: html_notebook
+---
+
+
+```{r, message=FALSE}
+library(MSnbase)
+library(msqrobsum)
+library(here)
+library(readxl)
+library(tidyverse)
+
+data_folder <- here("private_data")
+
+```
+
+
+```{r}
+data_path <- file(paste0(data_folder, "/peptides.txt"))
+exprs_col = grepEcols(data_path, 'Intensity ',split = '\t')
+set = readMSnSet2(data_path ,ecol = exprs_col,fnames = 'Sequence'
+                  , sep = '\t',stringsAsFactors = FALSE)
+```
+
+```{r}
+## Remove redundant words in sample names
+sampleNames(set) = str_replace(sampleNames(set),'Intensity.','')
+
+## We take the featureData and only keep the following info:
+## to which protein(group) the pepide belongs,
+## if it was labeled as an contaminant protein by Maxquant ('CON_' added to protein id)
+## and if the peptide was from a reverse (decoy protein)
+fd = fData(set) %>%
+      transmute(protein = Proteins
+          , contaminant = grepl('CON_',protein)
+          , reverse = Reverse == '+')
+
+
+descriptors <- read_excel(paste0(data_folder, "/IP_samples_quantity.xlsx"), range = "M2:R26", col_types = "text") %>%
+  mutate(No = as.integer(No), Sample_Name = as.character(No), Type = factor(Type, levels = c("No_Serum", "Not_Infected", "Infected_Early", "Infected_Late")), Infected = Type %in% c("Infected_Early", "Infected_Late"), Infected_Late = Type == "Infected_Late") %>%
+  as.data.frame() %>%
+  arrange(Sample_Name) %>%
+  column_to_rownames("Sample_Name") 
+  
+
+
+## We need to add to correct rownames to these dataframe so MSnBase can link it to the rows and columns of the expression matrix object in the MSnSet
+rownames(fd) = featureNames(set)
+## add it to the MSnSet object.
+fData(set) = fd
+pData(set) = descriptors
+set
+```
+
+
+```{r}
+prot_raw = read_tsv(paste0(data_folder,"/proteinGroups_ab.txt"))
+prot = prot_raw %>%
+  ## get the info of proteins only identified with a modification
+    transmute(site_only = !is.na(`Only identified by site`)
+              ## split the protein groups
+            , proteins = strsplit(`Protein IDs`,';')) %>%
+    unnest
+```
+```{r}
+## map this to the peptide info in the MSnSet object
+fd = fData(set)
+fd = fd %>% transmute(protein, proteins = strsplit(protein,';')) %>%
+    unnest %>% left_join(prot, by = 'proteins') %>% select(-proteins) %>%
+    group_by(protein) %>% summarise_all(any) %>%
+    left_join(fd,., by = 'protein')
+rownames(fd) = featureNames(set)
+fData(set) = fd
+set
+```
+
+```{r}
+exprs(set)[0 == (exprs(set))] <- NA
+plotNA(set)
+```
+
+```{r}
+set_log = log(set, base = 2)
+set_log_patients = set_log[,pData(set)$Type != "No_Serum"]
+```
+
+```{r}
+library(limma)
+plotMDS(exprs(set_log_patients), top = Inf,col = as.integer(pData(set_log_patients)$Bp))
+plotDensities(exprs(set_log_patients))
+```
+
+```{r}
+set_norm_patients = normalize(set[,pData(set)$Type != "No_Serum"], 'vsn')
+plotMDS(exprs(set_norm_patients), top = Inf,col = as.integer(pData(set_norm_patients)$Bp))
+
+set = set_norm_patients
+```
+
+
+```{r}
+groups = tibble(protein = fData(set)$protein) %>% distinct %>%
+  ## count the number of proteins in a protein group
+    mutate(proteins = strsplit(protein, ';'), n = lengths(proteins)) %>% unnest %>%
+  ## Check for every protein what the smallest protein group is, it belongs to
+  ## remove larger protein groups
+    group_by(proteins) %>% filter(n == min(n)) %>% ungroup %>%
+    count(protein,n) %>% filter(n == nn) %>% pull(protein)
+
+set <- set[fData(set)$protein %in% groups, ]
+```
+
+
+```{r}
+set <- set[!fData(set)$reverse]
+set <- set[!fData(set)$contaminant]
+set <- set[!fData(set)$site_only]
+set <- set[fData(set)$protein %in% prot_raw$`Protein IDs`[prot_raw$Bordetella == "+"]]
+set <- set[,pData(set)$Type != "No_Serum"]
+```
+
+
+```{r}
+library(msqrobsum)
+## filter out conditions that have not at least 2 samples
+### make them NA in msnset object
+## and remove peptides with less then 2 observations
+###########################################################
+while(TRUE) {
+  ## function to convert msnset to a dataframe
+    df = MSnSet2df(set)
+    ## check for conditions that have less then 2 samples
+    id <- df %>%  group_by(protein,Type, Bp) %>% summarise(n = length(unique(sample))) %>%
+        filter(n < 2) %>% ungroup %>% select(protein, Type, Bp) %>%
+        left_join(df, by = c('protein', 'Type','Bp')) %>% select(feature,sample)
+    ## If nothing is flagged for removal, stop
+    if(nrow(id) ==0) break
+    ## replace intensities with NA for these samples
+    exprs(set)[as.matrix(id)] = NA
+    ## and remove peptides with less then 2 observations
+set <- set[rowSums(!is.na(exprs(set))) >= 2]
+}
+set
+```
+
+```{r}
+p_data_factors <- pData(set) %>% mutate(Infected = factor(Infected), Infected_Late = factor(Infected_Late))
+rownames(p_data_factors) <- as.character(p_data_factors$No)
+pData(set) <- p_data_factors
+protset <- suppressWarnings(combineFeatures(set,fun="robust", groupBy = fData(set)$protein))
+
+
+
+msqrobsum_result_type <- msqrobsum(data = protset, expression ~  (1 | Type) + (1 | Bp) + (1 | Patient)
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Type')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected <- msqrobsum(data = protset, expression ~  (1 | Infected) + (1 |Infected_Late) + (1 | Bp) + (1 | Patient)
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_late <- msqrobsum(data = protset, expression ~  (1 | Infected) + (1 |Infected_Late) + (1 | Bp) + (1 | Patient)
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected_Late')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+
+```
+
+
+```{r}
+contrasts = msqrobsum_result_type %>% select(protein, contrasts) %>% unnest
+filter(contrasts,qvalue <.1)
+
+
+contrasts = msqrobsum_result_infected %>% select(protein, contrasts) %>% unnest
+
+filter(contrasts,qvalue <.1)
+
+
+contrasts = msqrobsum_result_infected_late %>% select(protein, contrasts) %>% unnest
+
+filter(contrasts,qvalue <.1)
+
+````
+
+
+
+
+
+
+
+
+
+
