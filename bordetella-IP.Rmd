@@ -115,6 +115,46 @@ tRNA_ligase_peptides <- peptide_names_from_table("Tab2_Bp_Tohama_uniprot_tRNA_li
 ```
 
 
+```{r}
+plot_peptides <- function(y_aes, peptides_to_show, scales = "fixed") {
+  name <-  quo_name(enquo(peptides_to_show))
+  data_main %>%
+    filter(ProteinIDs %in% peptides_to_show, Type != "No_Serum") %>%
+    ggplot(aes(x = Type, y = {{ y_aes }}, color = serum, shape = Bp)) + 
+    geom_smooth(aes(group = ProteinIDs), method = "lm", color = "black") +
+    geom_jitter(width = 0.2, height = 0) + facet_wrap(~ProteinIDs, scales = scales) + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5), axis.text.y = element_text(size = 6)) +
+    ggtitle(name)
+}
+```
+
+# Plotting results of msqrobsum
+
+```{r, fig.width= 10, fig.height=8}
+results_msqrob <- read_csv(paste0(data_folder, "/interesting_contrasts.csv"))
+
+adjusted_all <- results_msqrob %>% filter(model == "Adjusted") %>% pull("protein") %>% unique()
+
+save_width <- 10
+save_height <- 8
+
+adjusted_1 <- plot_peptides(LFQ, adjusted_all[1:25], scales = "free_y") + ggtitle("Adjusted - part 1")
+adjusted_1
+
+adjusted_2 <- plot_peptides(LFQ, adjusted_all[26:49], scales = "free_y") + ggtitle("Adjusted - part 2")
+adjusted_2
+
+rest_all <- setdiff(unique(results_msqrob$protein), adjusted_all)
+rest_1 <- plot_peptides(LFQ, rest_all[1:25], scales = "free_y") + ggtitle("Unadjusted - part 1")
+
+rest_2 <- plot_peptides(LFQ, rest_all[26:37], scales = "free_y") + ggtitle("Unadjusted - part 2")
+
+ggsave(paste0(data_folder, "/adjusted_1.png"), adjusted_1, width = save_width, height = save_height)
+ggsave(paste0(data_folder, "/adjusted_2.png"), adjusted_2, width = save_width, height = save_height)
+ggsave(paste0(data_folder, "/rest_1.png"), rest_1, width = save_width, height = save_height)
+ggsave(paste0(data_folder, "/rest_2.png"), rest_2, width = save_width, height = save_height)
+```
+
 # Choosing reasonable transformation of the LFQ data
 
 We would expect pertussin peptides and peptides shown active by ELISA to grow (together called active_peptides) while tRNA ligase and ribosomal peptides to be roughly flat. We also want to see that the samples of one type form a single cluster.
@@ -123,16 +163,7 @@ We would expect pertussin peptides and peptides shown active by ELISA to grow (t
 active_peptides <- c(pertussin_peptides, elisa_active_peptides)
 #peptides_to_show <- tRNA_ligase_peptides
 
-plot_peptides <- function(y_aes, peptides_to_show, scales = "fixed") {
-  name <-  quo_name(enquo(peptides_to_show))
-  data_main %>%
-    filter(ProteinIDs %in% peptides_to_show, Type != "No_Serum") %>%
-    ggplot(aes(x = Type, y = {{ y_aes }}, color = serum, shape = Bp)) + 
-    geom_smooth(aes(group = ProteinIDs), method = "lm", color = "black") +
-    geom_jitter(width = 0.2, height = 0) + facet_wrap(~ProteinIDs, scales = scales) + 
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5), axis.text.y = element_blank()) +
-    ggtitle(name)
-}
+
 
 plot_peptides(clr_LFQ, active_peptides)
 plot_peptides(clr_LFQ, tRNA_ligase_peptides)
@@ -193,6 +224,7 @@ LFQ has few clusters and too positive slopes.
 Verdict: There are two groups of metrics those on the log scale, which tend to have good slopes, but multiple clusters and those on raw scale which tend to have positive slopes even for "control" peptides but do not have clusters.
 
 For further investigation, we will use clr_LFQ as the representive from the first group, as there are theoretical resons to choose it and LFQ from the latter group as it is simpler.
+
 
 # Testing models on the pertussin peptides
 

@@ -3,6 +3,7 @@ title: "MsqRobSum"
 output: html_notebook
 ---
 
+Basically all code taken and slighlty modified from https://github.com/statOmics/MSqRobSum/blob/97e22fddb9d6f1d3c29aafbae28c382148b9471d/vignettes/msqrobsum.Rmd
 
 ```{r, message=FALSE}
 library(MSnbase)
@@ -181,27 +182,101 @@ msqrobsum_result_infected_late <- msqrobsum(data = protset, expression ~  (1 | I
 
 
 ```{r}
-contrasts = msqrobsum_result_type %>% select(protein, contrasts) %>% unnest
-filter(contrasts,qvalue <.1)
+contrasts = 
+  rbind(
+    msqrobsum_result_type %>% select(protein, contrasts) %>% unnest,
+    msqrobsum_result_infected %>% select(protein, contrasts) %>% unnest,
+    msqrobsum_result_infected_late %>% select(protein, contrasts) %>% unnest
+  )
+
+interesting_contrasts <- contrasts %>% 
+  filter(  contrast == "TypeInfected_Late-TypeInfected_Early" |
+           (contrast == "TypeNot_Infected-TypeInfected_Early" & logFC < 0) |   
+           (contrast == "TypeNot_Infected-TypeInfected_Late" & logFC < 0) |  
+           (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
+           (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
+           (contrast == "Infected_LateTRUE-Infected_LateFALSE")   
+         ,
+         pvalue <.05) %>%
+  mutate(model = "Adjusted")
+
+interesting_contrasts
+
+interesting_proteins <- unique(interesting_contrasts$protein)
+interesting_proteins
+
+```
 
 
-contrasts = msqrobsum_result_infected %>% select(protein, contrasts) %>% unnest
+```{r}
 
-filter(contrasts,qvalue <.1)
+msqrobsum_result_type_not_adjusted <- msqrobsum(data = protset, expression ~  (1 | Type)
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Type')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_not_adjusted <- msqrobsum(data = protset, expression ~  (1 | Infected) + (1 |Infected_Late) 
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_late_not_adjusted <- msqrobsum(data = protset, expression ~  (1 | Infected) + (1 |Infected_Late)
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected_Late')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+```
+
+```{r}
+contrasts_not_adjusted = 
+  rbind(
+    msqrobsum_result_type_not_adjusted %>% select(protein, contrasts) %>% unnest,
+    msqrobsum_result_infected_not_adjusted %>% select(protein, contrasts) %>% unnest,
+    msqrobsum_result_infected_late_not_adjusted %>% select(protein, contrasts) %>% unnest
+  )
+
+interesting_contrasts_not_adjusted <- contrasts_not_adjusted %>%
+   filter(  contrast == "TypeInfected_Late-TypeInfected_Early" |
+           (contrast == "TypeNot_Infected-TypeInfected_Early" & logFC < 0) |   
+           (contrast == "TypeNot_Infected-TypeInfected_Late" & logFC < 0) |  
+           (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
+           (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
+           (contrast == "Infected_LateTRUE-Infected_LateFALSE")   
+         ,
+         pvalue <.05)  %>%
+    mutate(model = "NotAdjusted")
 
 
-contrasts = msqrobsum_result_infected_late %>% select(protein, contrasts) %>% unnest
+interesting_contrasts_not_adjusted
 
-filter(contrasts,qvalue <.1)
+interesting_proteins_not_adjusted <- unique(interesting_contrasts_not_adjusted$protein)
+interesting_proteins_not_adjusted
 
-````
+setdiff(interesting_proteins_not_adjusted, interesting_proteins)
+setdiff(interesting_proteins, interesting_proteins_not_adjusted)
 
-
-
-
-
-
+```
 
 
+
+```{r}
+pertussin_peptides <- c("P0A3R5", "P04978", "P04977", "P04979", "P04981")
+elisa_active_peptides <- c("P12255", "P0DKX7", "Q79GX8")
+
+setdiff(elisa_active_peptides, interesting_proteins_not_adjusted)
+```
+
+```{r}
+write.csv(rbind(interesting_contrasts, interesting_contrasts_not_adjusted), paste0(data_folder,"/interesting_contrasts.csv"))
+```
 
 
