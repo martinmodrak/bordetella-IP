@@ -128,27 +128,32 @@ library(msqrobsum)
 ### make them NA in msnset object
 ## and remove peptides with less then 2 observations
 ###########################################################
-while(TRUE) {
-  ## function to convert msnset to a dataframe
-    df = MSnSet2df(set)
-    ## check for conditions that have less then 2 samples
-    id <- df %>%  group_by(protein,Type, Bp) %>% summarise(n = length(unique(sample))) %>%
-        filter(n < 2) %>% ungroup %>% select(protein, Type, Bp) %>%
-        left_join(df, by = c('protein', 'Type','Bp')) %>% select(feature,sample)
-    ## If nothing is flagged for removal, stop
-    if(nrow(id) ==0) break
-    ## replace intensities with NA for these samples
-    exprs(set)[as.matrix(id)] = NA
-    ## and remove peptides with less then 2 observations
-set <- set[rowSums(!is.na(exprs(set))) >= 2]
+
+filter_unrepresented <- function(set) {
+  while(TRUE) {
+    ## function to convert msnset to a dataframe
+      df = MSnSet2df(set)
+      ## check for conditions that have less then 2 samples
+      id <- df %>%  group_by(protein,Type, Bp) %>% summarise(n = length(unique(sample))) %>%
+          filter(n < 2) %>% ungroup %>% select(protein, Type, Bp) %>%
+          left_join(df, by = c('protein', 'Type','Bp')) %>% select(feature,sample)
+      ## If nothing is flagged for removal, stop
+      if(nrow(id) ==0) break
+      ## replace intensities with NA for these samples
+      exprs(set)[as.matrix(id)] = NA
+      ## and remove peptides with less then 2 observations
+  set <- set[rowSums(!is.na(exprs(set))) >= 2]
+  }
+  set
 }
-set
+
+set <- filter_unrepresented(set)
 ```
 
 ```{r}
-p_data_factors <- pData(set) %>% mutate(Infected = factor(Infected), Infected_Late = factor(Infected_Late))
-rownames(p_data_factors) <- as.character(p_data_factors$No)
-pData(set) <- p_data_factors
+# p_data_factors <- pData(set) %>% mutate(Infected = factor(Infected), Infected_Late = factor(Infected_Late))
+# rownames(p_data_factors) <- as.character(p_data_factors$No)
+# pData(set) <- p_data_factors
 protset <- suppressWarnings(combineFeatures(set,fun="robust", groupBy = fData(set)$protein))
 
 
@@ -252,7 +257,7 @@ interesting_contrasts_not_adjusted <- contrasts_not_adjusted %>%
            (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
            (contrast == "Infected_LateTRUE-Infected_LateFALSE")   
          ,
-         pvalue <.05)  %>%
+         qvalue <.05)  %>%
     mutate(model = "NotAdjusted")
 
 
@@ -266,6 +271,63 @@ setdiff(interesting_proteins, interesting_proteins_not_adjusted)
 
 ```
 
+```{r}
+set_Bp46 <- filter_unrepresented(set[,pData(set)$Bp == "46"])
+set_Bp6260 <- filter_unrepresented(set[,pData(set)$Bp == "6260"])
+protset_Bp46 <- combineFeatures(set,fun="robust", groupBy = fData(set)$protein, verbose = TRUE)
+protset_Bp46 <- combineFeatures(set_Bp46,fun="robust", groupBy = fData(set_Bp46)$protein, verbose = TRUE)
+protset_Bp6260 <- suppressWarnings(combineFeatures(set_Bp6260,fun="robust", groupBy = fData(set_Bp6260)$protein))
+
+
+
+msqrobsum_result_type_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Type) 
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Type')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Infected) + (1 |Infected_Late)                              
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_late_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Infected) + (1 |Infected_Late) 
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected_Late')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_type_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Type) 
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Type')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Infected) + (1 |Infected_Late)                              
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+
+msqrobsum_result_infected_late_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Infected) + (1 |Infected_Late) 
+                              ,  mode = 'msqrobsum'
+                              , contrasts = c('Infected_Late')
+                              ## group by folowing variables,
+                              ## they will also be retained in output
+                              , group_vars = c('protein')
+                              )
+```
 
 
 ```{r}
