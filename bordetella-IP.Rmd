@@ -133,26 +133,23 @@ plot_peptides <- function(y_aes, peptides_to_show, scales = "fixed") {
 ```{r, fig.width= 10, fig.height=8}
 results_msqrob <- read_csv(paste0(data_folder, "/interesting_contrasts.csv"))
 
-adjusted_all <- results_msqrob %>% filter(model == "Adjusted") %>% pull("protein") %>% unique()
-
 save_width <- 10
 save_height <- 8
 
-adjusted_1 <- plot_peptides(LFQ, adjusted_all[1:25], scales = "free_y") + ggtitle("Adjusted - part 1")
-adjusted_1
+unique_proteins <- unique(results_msqrob$protein)
 
-adjusted_2 <- plot_peptides(LFQ, adjusted_all[26:49], scales = "free_y") + ggtitle("Adjusted - part 2")
-adjusted_2
+for(i in 1: ceiling(length(unique_proteins) / 25)) {
+  min_index <- ((i - 1) * 25 + 1)
+  max_index <- min_index + 25
 
-rest_all <- setdiff(unique(results_msqrob$protein), adjusted_all)
-rest_1 <- plot_peptides(LFQ, rest_all[1:25], scales = "free_y") + ggtitle("Unadjusted - part 1")
+  print(c(min_index, max_index))
+  plot_part <- plot_peptides(LFQ, unique_proteins[min_index:max_index], scales = "free_y") +     
+      ggtitle(paste0("Possibly changing proteins - part ", i))
+  
+  print(plot_part)
+  ggsave(paste0(data_folder, "/plots_",i, ".png"), plot_part, width = save_width, height = save_height)
+}
 
-rest_2 <- plot_peptides(LFQ, rest_all[26:37], scales = "free_y") + ggtitle("Unadjusted - part 2")
-
-ggsave(paste0(data_folder, "/adjusted_1.png"), adjusted_1, width = save_width, height = save_height)
-ggsave(paste0(data_folder, "/adjusted_2.png"), adjusted_2, width = save_width, height = save_height)
-ggsave(paste0(data_folder, "/rest_1.png"), rest_1, width = save_width, height = save_height)
-ggsave(paste0(data_folder, "/rest_2.png"), rest_2, width = save_width, height = save_height)
 ```
 
 # Choosing reasonable transformation of the LFQ data

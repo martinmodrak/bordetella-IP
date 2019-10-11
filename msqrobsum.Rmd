@@ -39,7 +39,8 @@ fd = fData(set) %>%
 
 
 descriptors <- read_excel(paste0(data_folder, "/IP_samples_quantity.xlsx"), range = "M2:R26", col_types = "text") %>%
-  mutate(No = as.integer(No), Sample_Name = as.character(No), Type = factor(Type, levels = c("No_Serum", "Not_Infected", "Infected_Early", "Infected_Late")), Infected = Type %in% c("Infected_Early", "Infected_Late"), Infected_Late = Type == "Infected_Late") %>%
+  mutate(No = as.integer(No), Sample_Name = as.character(No), Type = factor(Type, levels = c("No_Serum", "Not_Infected", "Infected_Early", "Infected_Late")), Infected = Type %in% c("Infected_Early", "Infected_Late"), Infected_Late = Type == "Infected_Late",
+  TypeBp = interaction(Type, Bp)) %>%
   as.data.frame() %>%
   arrange(Sample_Name) %>%
   column_to_rownames("Sample_Name") 
@@ -257,7 +258,7 @@ interesting_contrasts_not_adjusted <- contrasts_not_adjusted %>%
            (contrast == "InfectedTRUE-InfectedFALSE" & logFC > 0) |    
            (contrast == "Infected_LateTRUE-Infected_LateFALSE")   
          ,
-         qvalue <.05)  %>%
+         pvalue <.05)  %>%
     mutate(model = "NotAdjusted")
 
 
@@ -272,73 +273,49 @@ setdiff(interesting_proteins, interesting_proteins_not_adjusted)
 ```
 
 ```{r}
-set_Bp46 <- filter_unrepresented(set[,pData(set)$Bp == "46"])
-set_Bp6260 <- filter_unrepresented(set[,pData(set)$Bp == "6260"])
-protset_Bp46 <- combineFeatures(set,fun="robust", groupBy = fData(set)$protein, verbose = TRUE)
-protset_Bp46 <- combineFeatures(set_Bp46,fun="robust", groupBy = fData(set_Bp46)$protein, verbose = TRUE)
-protset_Bp6260 <- suppressWarnings(combineFeatures(set_Bp6260,fun="robust", groupBy = fData(set_Bp6260)$protein))
-
-
-
-msqrobsum_result_type_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Type) 
+msqrobsum_result_type_Bp <- msqrobsum(data = protset, expression ~  (1 | TypeBp) 
                               ,  mode = 'msqrobsum'
-                              , contrasts = c('Type')
+                              , contrasts = c('TypeBp')
                               ## group by folowing variables,
                               ## they will also be retained in output
                               , group_vars = c('protein')
                               )
 
-msqrobsum_result_infected_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Infected) + (1 |Infected_Late)                              
-                              ,  mode = 'msqrobsum'
-                              , contrasts = c('Infected')
-                              ## group by folowing variables,
-                              ## they will also be retained in output
-                              , group_vars = c('protein')
-                              )
-
-msqrobsum_result_infected_late_Bp46 <- msqrobsum(data = protset_Bp46, expression ~  (1 | Infected) + (1 |Infected_Late) 
-                              ,  mode = 'msqrobsum'
-                              , contrasts = c('Infected_Late')
-                              ## group by folowing variables,
-                              ## they will also be retained in output
-                              , group_vars = c('protein')
-                              )
-
-msqrobsum_result_type_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Type) 
-                              ,  mode = 'msqrobsum'
-                              , contrasts = c('Type')
-                              ## group by folowing variables,
-                              ## they will also be retained in output
-                              , group_vars = c('protein')
-                              )
-
-msqrobsum_result_infected_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Infected) + (1 |Infected_Late)                              
-                              ,  mode = 'msqrobsum'
-                              , contrasts = c('Infected')
-                              ## group by folowing variables,
-                              ## they will also be retained in output
-                              , group_vars = c('protein')
-                              )
-
-msqrobsum_result_infected_late_Bp6260 <- msqrobsum(data = protset_Bp6260, expression ~  (1 | Infected) + (1 |Infected_Late) 
-                              ,  mode = 'msqrobsum'
-                              , contrasts = c('Infected_Late')
-                              ## group by folowing variables,
-                              ## they will also be retained in output
-                              , group_vars = c('protein')
-                              )
-```
-
-
-```{r}
-pertussin_peptides <- c("P0A3R5", "P04978", "P04977", "P04979", "P04981")
-elisa_active_peptides <- c("P12255", "P0DKX7", "Q79GX8")
-
-setdiff(elisa_active_peptides, interesting_proteins_not_adjusted)
 ```
 
 ```{r}
-write.csv(rbind(interesting_contrasts, interesting_contrasts_not_adjusted), paste0(data_folder,"/interesting_contrasts.csv"))
+contrasts_type_bp = 
+  rbind(
+    msqrobsum_result_type_Bp %>% select(protein, contrasts) %>% unnest
+  )
+
+interesting_contrasts_type_bp  <- contrasts_type_bp %>%
+   separate(col = "contrast", sep = "[.-]", into = c("contrast_first", "Bp_first","contrast_second","Bp_second")) %>%
+   filter(Bp_first == Bp_second,  
+           (contrast_first == "TypeBpInfected_Late" & contrast_second == "TypeBpInfected_Early") |
+           (contrast_first == "TypeNot_Infected" & logFC < 0) 
+         ,
+         pvalue <.05)  %>%
+    mutate(model = "SeparateBp",
+           contrast = paste(contrast_first,contrast_second, sep = "-"),
+           Bp = Bp_first) %>%
+    select(protein, contrast, logFC, sigma_contrast, se, t, pvalue, qvalue, model)
+
+
+interesting_contrasts_type_bp
 ```
+
+
+
+
+```{r}
+write.csv(rbind(interesting_contrasts, interesting_contrasts_not_adjusted, interesting_contrasts_type_bp), paste0(data_folder,"/interesting_contrasts.csv"))
+```
+
+
+
+
+
+
 
 
