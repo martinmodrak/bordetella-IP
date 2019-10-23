@@ -296,9 +296,8 @@ interesting_contrasts_type_bp  <- contrasts_type_bp %>%
            (contrast_first == "TypeNot_Infected" & logFC < 0) 
          ,
          pvalue <.05)  %>%
-    mutate(model = "SeparateBp",
-           contrast = paste(contrast_first,contrast_second, sep = "-"),
-           Bp = Bp_first) %>%
+    mutate(model = paste0("SeparateBp_", Bp_first),
+           contrast = gsub("TypeBp", "", paste(contrast_first,contrast_second, sep = "-"), fixed = TRUE)) %>%
     select(protein, contrast, logFC, sigma_contrast, se, t, pvalue, qvalue, model)
 
 
